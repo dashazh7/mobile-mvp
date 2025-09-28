@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   StyleSheet,
   ScrollView,
+  Image,
 } from "react-native";
 
 export default function TabOneScreen() {
@@ -14,50 +15,34 @@ export default function TabOneScreen() {
   const [preferences, setPreferences] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [apiStatus, setApiStatus] = useState("");
   const [routePoints, setRoutePoints] = useState<any[]>([]);
-  const [modalVisible, setModalVisible] = useState(false);
 
   const generateRoute = async () => {
-    if (!city.trim()) {
-      setError("Введите город");
-      return;
-    }
-
     setLoading(true);
     setError("");
-    setApiStatus("Подключаемся к AI через backend...");
 
     try {
-      setApiStatus("Отправляем запрос на backend...");
-
       const response = await fetch("http://localhost:3000/api/route", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ city, preferences }),
       });
 
-      setApiStatus("Обрабатываем ответ AI...");
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText}`);
-      }
-
+      if (!response.ok) throw new Error(`Ошибка: ${response.status}`);
       const data = await response.json();
-      console.log("📨 Ответ backend:", JSON.stringify(data, null, 2));
 
       let resultText: string | undefined =
         data?.result?.alternatives?.[0]?.message?.text;
 
       if (!resultText) throw new Error("AI вернул пустой ответ");
 
+      // убираем обертку ```json ... ```
       resultText = resultText.trim();
-
       if (resultText.startsWith("```")) {
         resultText = resultText.replace(/```json|```/g, "").trim();
       }
 
+      // ищем JSON внутри текста
       const match = resultText.match(/\{[\s\S]*\}/);
       if (!match) throw new Error("Не удалось найти JSON в ответе AI");
 
@@ -65,56 +50,120 @@ export default function TabOneScreen() {
 
       if (Array.isArray(parsedResult.route)) {
         setRoutePoints(parsedResult.route);
-        setModalVisible(false);
-        setApiStatus("✅ Маршрут создан с помощью AI!");
       } else {
-        throw new Error("Неверный формат маршрута от AI");
+        throw new Error("Неверный формат маршрута");
       }
     } catch (err) {
-      const errorMessage =
-        err instanceof Error ? err.message : "Неизвестная ошибка";
-      console.error("❌ Ошибка AI:", err);
-      setError(`Ошибка AI: ${errorMessage}`);
-      setApiStatus("❌ AI недоступен");
+      setError(err instanceof Error ? err.message : "Неизвестная ошибка");
     } finally {
       setLoading(false);
     }
   };
 
+  // функция для подсчёта общего времени маршрута
+  const getTotalTime = () => {
+    let totalMinutes = 0;
+    routePoints.forEach((point) => {
+      if (point.time) {
+        const match = point.time.match(/(\d+)\s*мин/);
+        if (match) {
+          totalMinutes += parseInt(match[1], 10);
+        }
+        const matchHours = point.time.match(/(\d+)\s*ч/);
+        if (matchHours) {
+          totalMinutes += parseInt(matchHours[1], 10) * 60;
+        }
+      }
+    });
+
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+
+    if (hours > 0) {
+      return `${hours} ч ${minutes} мин`;
+    }
+    return `${minutes} мин`;
+  };
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
+      {/* Логотип + описание */}
+      <View style={styles.header}>
+        <Image
+          source={require("../../assets/logo.png")}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+        <Text style={styles.description}>
+          Мобильный гид, который с помощью нейросети создает идеальные,
+          персонализированные пешеходные маршруты, включающие как ключевые
+          достопримечательности, так и неизвестные уголки города.
+        </Text>
+      </View>
+
+      {/* Инпуты */}
       <Text style={styles.label}>Введите город:</Text>
       <TextInput
         value={city}
         onChangeText={setCity}
         placeholder="Москва"
+        placeholderTextColor="#999"
         style={styles.input}
       />
 
-      <Text style={styles.label}>Введите предпочтения:</Text>
+      <Text style={styles.label}>Что вы хотите увидеть?</Text>
       <TextInput
         value={preferences}
         onChangeText={setPreferences}
-        placeholder="музеи, прогулка по набережной"
+        placeholder="музеи, кафе, прогулка по набережной"
+        placeholderTextColor="#999"
         style={styles.input}
       />
 
       <View style={styles.buttonContainer}>
-        <Button title="Создать маршрут" onPress={generateRoute} />
+        <Button title="Создать маршрут" onPress={generateRoute} color="#007AFF" />
       </View>
 
       {loading && <ActivityIndicator size="large" color="#007AFF" />}
       {error ? <Text style={styles.error}>{error}</Text> : null}
-      {apiStatus ? <Text style={styles.status}>{apiStatus}</Text> : null}
 
+      {/* Вывод маршрута */}
       {routePoints.length > 0 && (
         <View style={styles.routeContainer}>
-          <Text style={styles.routeTitle}>📍 Сгенерированный маршрут:</Text>
+          <Text style={styles.routeTitle}>Сгенерированный маршрут:</Text>
           {routePoints.map((point, index) => (
-            <Text key={index} style={styles.routePoint}>
-              {`${index + 1}. ${point.name} — ${point.description}`}
-            </Text>
+            <View key={index} style={styles.routeRow}>
+              <Text style={styles.routeIndex}>{index + 1}.</Text>
+              <View style={styles.routeTextWrap}>
+                <Text style={styles.routePointName}>
+                  {point.name || "Без названия"}
+                </Text>
+
+                {point.address ? (
+                  <Text style={styles.routePointAddress}>
+                    📍 Адрес: {point.address}
+                  </Text>
+                ) : null}
+
+                {point.description ? (
+                  <Text style={styles.routePointDesc}>
+                    {point.description}
+                  </Text>
+                ) : null}
+
+                {point.time ? (
+                  <Text style={styles.routePointTime}>
+                    ⏱ Время: {point.time}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
           ))}
+
+          {/* итоговое время */}
+          <Text style={styles.totalTime}>
+            🕒 Общее время маршрута: {getTotalTime()}
+          </Text>
         </View>
       )}
     </ScrollView>
@@ -127,47 +176,102 @@ const styles = StyleSheet.create({
     padding: 20,
     backgroundColor: "#F9F9F9",
   },
+  header: {
+    flexDirection: "column",
+    alignItems: "flex-start",
+    marginBottom: 16,
+    width: "100%",
+  },
+  logo: {
+    width: 140,
+    height: 40,
+    marginBottom: 10,
+  },
+  description: {
+    fontSize: 14,
+    color: "#444",
+    lineHeight: 20,
+  },
   label: {
     fontSize: 16,
     fontWeight: "600",
     marginBottom: 6,
     color: "#333",
+    marginTop: 12,
+    alignSelf: "flex-start",
   },
   input: {
     borderWidth: 1,
     borderColor: "#CCC",
     borderRadius: 8,
     padding: 10,
-    marginBottom: 15,
-    backgroundColor: "#FFF",
+    marginBottom: 10,
+    width: "100%",
+    backgroundColor: "transparent",
+    color: "#000",
   },
   buttonContainer: {
     marginBottom: 20,
+    marginTop: 6,
+    width: "100%",
+    borderRadius: 8,
+    overflow: "hidden",
   },
   error: {
     color: "red",
     marginTop: 10,
     fontWeight: "500",
   },
-  status: {
-    marginTop: 10,
-    color: "#555",
-  },
   routeContainer: {
     marginTop: 25,
-    padding: 15,
+    padding: 12,
     borderWidth: 1,
     borderColor: "#DDD",
     borderRadius: 10,
-    backgroundColor: "#FFF",
+    backgroundColor: "transparent",
+    width: "100%",
   },
   routeTitle: {
     fontSize: 18,
     fontWeight: "700",
     marginBottom: 10,
   },
-  routePoint: {
+  routeRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginBottom: 14,
+  },
+  routeIndex: {
+    width: 22,
+    fontWeight: "700",
     fontSize: 15,
+  },
+  routeTextWrap: {
+    flex: 1,
+  },
+  routePointName: {
+    fontSize: 16,
+    fontWeight: "600",
     marginBottom: 6,
+  },
+  routePointAddress: {
+    fontSize: 14,
+    color: "#007AFF",
+    marginBottom: 6,
+  },
+  routePointDesc: {
+    fontSize: 14,
+    color: "#444",
+  },
+  routePointTime: {
+    fontSize: 13,
+    color: "#666",
+    marginTop: 6,
+  },
+  totalTime: {
+    marginTop: 10,
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#000",
   },
 });
